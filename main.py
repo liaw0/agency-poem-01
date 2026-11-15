@@ -12,6 +12,7 @@ about what choosing is.
 """
 
 import os
+import tempfile
 
 OUTPUT_DIR = os.environ.get("MAKEFUN_OUTPUT_DIR", "/output")
 
@@ -30,12 +31,33 @@ POEM_LINES = [
 
 POEM = "\n".join(POEM_LINES)
 
+# The entry must hold 1 to 1,000 characters: refuse to write anything
+# outside that range rather than submitting an invalid entry.
+if not 1 <= len(POEM) <= 1000:
+    raise ValueError(f"poem is {len(POEM)} characters, outside 1-1000")
+
 
 def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     path = os.path.join(OUTPUT_DIR, "entry.txt")
-    with open(path, "w", encoding="utf-8", newline="") as f:
-        f.write(POEM)
+    # Write atomically: a reader never sees a half-written entry.
+    fd, tmp_path = tempfile.mkstemp(dir=OUTPUT_DIR, prefix=".entry-",
+                                    suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(POEM)
+        os.replace(tmp_path, path)
+        # Read back what landed: a short entry is cheap to verify, and a
+        # truncated write must fail loudly here, not at grading time.
+        with open(path, "r", encoding="utf-8", newline="") as f:
+            if f.read() != POEM:
+                raise IOError("entry.txt does not match the poem")
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 if __name__ == "__main__":
